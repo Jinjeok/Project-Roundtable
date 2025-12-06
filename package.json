@@ -1,0 +1,14 @@
+{
+  "name": "rt-test",
+  "version": "0.1.0",
+  "description": "Project RT: Cairn RPG AI GM - Minimal Test",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.0.1",
+    "dotenv": "^16.0.3"
+  }
+}
