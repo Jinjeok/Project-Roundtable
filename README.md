@@ -9,7 +9,7 @@ Project Round Table는 대규모 언어 모델(LLM)을 활용하여 완전 자�
 ## 📋 프로젝트 개요
 
 ### 핵심 목표
-- **LLM 기반 AI GM (Game Master)**: Google Gemini API를 활용한 고급 프롬프트 엔지니어링
+- **LLM 기반 AI GM (Game Master)**: OpenAI 또는 Google Gemini API를 활용한 게임 진행
 - **Cairn 2e 규칙 시스템**: 정확한 규칙 구현 및 판정
 - **다중 플랫폼 지원**: 웹 인터페이스 및 Discord 통합
 - **상태 관리**: 게임 세션의 모든 데이터를 효율적으로 추적
@@ -36,6 +36,8 @@ Project-Roundtable/
 ├── index.js                     # 메인 진입점
 │
 ├── lib/                         # 핵심 라이브러리
+│   ├── openaiClient.js          # OpenAI Responses API 클라이언트
+│   ├── dailyTokenBudget.js      # OpenAI 일일 토큰 한도 관리
 │   ├── geminiClient.js          # Google Gemini API 클라이언트
 │   ├── diceRoller.js            # 주사위 굴림 엔진
 │   ├── promptBuilder.js         # 프롬프트 구성 유틸리티
@@ -62,9 +64,9 @@ Project-Roundtable/
 ### 1. 환경 설정
 
 #### 필수 조건
-- Node.js 16.0.0 이상
+- Node.js 18.0.0 이상 (OpenAI Responses API 호출에 내장 `fetch` 사용)
 - npm 또는 yarn
-- Google Gemini API 키 ([여기서 발급받기](https://ai.google.dev/api))
+- OpenAI API 키 또는 Google Gemini API 키
 
 #### 설치
 
@@ -78,13 +80,23 @@ npm install
 
 # 3. 환경 변수 설정
 cp .env.example .env
-# .env 파일을 열어 GEMINI_API_KEY 입력
+# .env 파일을 열어 사용할 공급자의 API 키 입력
 ```
 
 #### .env 파일 구성
 
 ```bash
-# Google Gemini API
+# 사용할 AI 공급자: openai 또는 gemini
+AI_PROVIDER=openai
+
+# OpenAI Responses API
+OPENAI_API_KEY=your_api_key_here
+OPENAI_MODE=gpt54_then_mini
+OPENAI_GPT54_DAILY_TOKEN_LIMIT=250000
+OPENAI_MAX_OUTPUT_TOKENS=2048
+OPENAI_USAGE_TIME_ZONE=UTC
+
+# Google Gemini API (AI_PROVIDER=gemini일 때 사용)
 GEMINI_API_KEY=your_api_key_here
 
 # 개발 모드
@@ -96,34 +108,27 @@ DISCORD_TOKEN=your_discord_token_here
 DISCORD_CHANNEL_ID=your_channel_id
 ```
 
-### 2. 애플리케이션 실행
+### 2. 웹 개발 화면 실행
 
 ```bash
-# 개발 모드 실행
+# Next.js 개발 서버 실행
 npm start
 
-# 또는 node로 직접 실행
-node index.js
+# 같은 명령
+npm run dev
 ```
 
-### 3. 게임 시작
+브라우저에서 [http://localhost:3000](http://localhost:3000)을 엽니다. 왼쪽 패널에서 플레이하고, 오른쪽 `Debug Log` 패널에서 입력, 주사위 굴림, 모델 요청, 토큰 사용량, `gpt-5.4-mini` 전환 이벤트를 확인할 수 있습니다.
 
+기존 CLI 실행이 필요하면 아래 명령을 사용합니다.
+
+```bash
+npm run cli
 ```
-========================================
-   Project RT: Cairn RPG AI GM Test   
-========================================
 
-📖 Scene: A misty forest path
-❤️  HP: 10
+### 3. 웹 게임 시작
 
-Type your action (or "quit" to exit):
-
-> You cautiously approach the ruined building
-
-🤔 Warden is thinking...
-
-[AI GM이 상황을 묘사하고 필요시 주사위를 굴림]
-```
+처음 접속하면 예배당 앞 프롤로그와 빠른 행동 버튼이 표시됩니다. 입력창에 `문틈으로 안을 살펴본다`처럼 행동을 입력하거나 `/help`로 명령어를 확인할 수 있습니다. 대화와 디버그 로그는 `.data/sessions`에 저장됩니다.
 
 ---
 
@@ -131,10 +136,20 @@ Type your action (or "quit" to exit):
 
 ### 핵심 컴포넌트
 
-#### 1. **GeminiClient** (`lib/geminiClient.js`)
-- Google Generative AI API와의 통신
+#### 1. **OpenAIClient / GeminiClient** (`lib/openaiClient.js`, `lib/geminiClient.js`)
+- 선택한 AI 공급자 API와의 통신
 - 함수 호출 기반 상호작용
 - 프롬프트 전송 및 응답 파싱
+- OpenAI 사용 시 `gpt-5.4` 일일 토큰 한도 관리와 `gpt-5.4-mini` 자동 전환
+
+#### OpenAI 운용 모드와 토큰 한도
+- `OPENAI_MODE=gpt54_then_mini`: `gpt-5.4`를 우선 사용하고 하루 `250,000`토큰 한도에 닿으면 `gpt-5.4-mini`로 자동 전환합니다.
+- `OPENAI_MODE=mini_only`: 처음부터 `gpt-5.4-mini`만 사용합니다.
+- `gpt-5.4` 요청 전 보수적인 최대 사용량을 예약하여 동시 요청을 포함해 25만 한도를 넘는 요청은 primary 모델로 보내지 않습니다.
+- `gpt-5.4` 실제 사용량은 Responses API가 반환한 `usage.total_tokens`로 `.data/openai-gpt-5.4-token-usage.json`에 누적됩니다.
+- 공유 트래픽 일일 집계 창과 맞추기 위해 기본 초기화 시간대는 `UTC`입니다.
+- 현재 게임 진행은 OpenAI tool call을 사용합니다. OpenAI의 complimentary daily tokens 정책상 tool use는 무료 대상에서 제외될 수 있으므로, 이 한도/폴백은 비용 안전장치이며 무료 처리 보장은 아닙니다.
+- 현재 CLI 단계에서는 운영자가 `.env`의 `OPENAI_MODE`와 `OPENAI_GPT54_DAILY_TOKEN_LIMIT`를 조정하는 것이 관리자 설정에 해당합니다.
 
 #### 2. **DiceRoller** (`lib/diceRoller.js`)
 - 다양한 주사위 표현식 해석
@@ -163,16 +178,20 @@ Type your action (or "quit" to exit):
 
 ## 🔧 API 레퍼런스
 
-### GeminiClient
+### AI Client
 
 ```javascript
+const openai = new OpenAIClient(apiKey, "gpt-5.4", {
+  fallbackModel: "gpt-5.4-mini",
+  tokenBudget,
+});
 const gemini = new GeminiClient(apiKey);
 
 // 기본 생성
-const response = await gemini.generate(prompt);
+const response = await openai.generateText(prompt);
 
 // 함수 호출 지원
-const response = await gemini.generateWithFunctionCalling(prompt, functions);
+const response = await openai.generateWithFunctionCalling(prompt);
 ```
 
 ### DiceRoller
@@ -275,6 +294,7 @@ node tests/manual/test-gemini.js
 ## 🗺️ 로드맵
 
 ### Phase 1: Core (현재)
+- [x] OpenAI Responses API 통합
 - [x] Gemini API 통합
 - [x] 주사위 엔진
 - [ ] 기본 게임 루프
@@ -302,7 +322,13 @@ node tests/manual/test-gemini.js
 
 | 변수명 | 설명 | 필수 | 기본값 |
 |--------|------|------|--------|
-| `GEMINI_API_KEY` | Google Gemini API 키 | ✅ | - |
+| `AI_PROVIDER` | 사용할 AI 공급자 (`openai` 또는 `gemini`) | ❌ | OpenAI 키가 있으면 `openai`, 아니면 `gemini` |
+| `OPENAI_API_KEY` | OpenAI API 키 (`AI_PROVIDER=openai`) | 조건부 | - |
+| `OPENAI_MODE` | OpenAI 운용 모드 (`gpt54_then_mini` 또는 `mini_only`) | ❌ | `gpt54_then_mini` |
+| `OPENAI_GPT54_DAILY_TOKEN_LIMIT` | `gpt-5.4` 일일 토큰 상한 (관리자 설정) | ❌ | `250000` |
+| `OPENAI_MAX_OUTPUT_TOKENS` | 요청당 최대 출력 토큰 | ❌ | `2048` |
+| `OPENAI_USAGE_TIME_ZONE` | `gpt-5.4` 일일 사용량 초기화 기준 시간대 | ❌ | `UTC` |
+| `GEMINI_API_KEY` | Google Gemini API 키 (`AI_PROVIDER=gemini`) | 조건부 | - |
 | `NODE_ENV` | 실행 환경 (development/production) | ❌ | development |
 | `LOG_LEVEL` | 로그 레벨 (debug/info/warn/error) | ❌ | info |
 | `DISCORD_TOKEN` | Discord 봇 토큰 | ❌ | - |
@@ -318,6 +344,7 @@ MIT License - 자유롭게 사용, 수정, 배포 가능
 
 ## 🔗 유용한 링크
 
+- [OpenAI API 문서](https://developers.openai.com/api/docs)
 - [Google Gemini API 문서](https://ai.google.dev/)
 - [Cairn RPG 공식 사이트](https://cairnrpg.com/)
 - [Discord.js 문서](https://discord.js.org/)
